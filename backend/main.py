@@ -7,7 +7,9 @@ Endpoints
 """
 import json
 import os
+import time
 from datetime import date
+from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -15,10 +17,12 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
 from pydantic import BaseModel, Field
-from fastapi.middleware.cors import CORSMiddleware
+
 load_dotenv()
 
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+MAX_CHUNK_DAYS = 7
+
 app = FastAPI(title="Voyara API")
 app.add_middleware(
     CORSMiddleware,
@@ -27,44 +31,71 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_client: Optional[Groq] = None
+_cache: dict = {}  # same request twice -> instant answer (great for demos)
 
-# ---------- request / response shapes ----------
+
+def get_client() -> Groq:
+    global _client
+    if _client is None:
+        _client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    return _client
+
+
+# ---------- request shape ----------
 class TripRequest(BaseModel):
     destination: str = "Kyoto, Japan"
     start_date: date
     end_date: date
-    budget_inr: int = Field(75000, ge=5000)
+    budget_inr: int = Field(75000, ge=1000)
+    budget: Optional[int] = None  # the frontend sends this name
     interests: list[str] = ["Culture", "Food"]
     accessibility: bool = False
+    day_offset: int = 0  # which day of the full trip this chunk starts at
+    total_days: Optional[int] = None  # length of the full trip
 
 
 # ---------- 1. itinerary: LLM draft + rule validation ----------
 SYSTEM_PROMPT = """You are Voyara's trip planner. Return ONLY valid JSON, no prose, no code fences.
 Schema:
 {"days":[{"stops":[{"time":"HH:MM","name":str,"category":"Sight|Food|Culture|Nature|Walk|Shopping|Evening|Indoor|Explore",
-"description":str (one line),"badge":str (2-4 words, e.g. 'Rain-safe alternative available'),
-"insights":[str,str,str] (short, review-style, e.g. 'Quiet in mornings'),
-"travel":str (e.g. '12 min by taxi'),"indoor":bool,"step_free":bool}]}]}
-Rules: 4 stops per day, times ascending between 08:00 and 21:00, realistic travel times,
-real places only, total spend within the budget."""
+"description":str (one short line),"badge":str (2-4 words),
+"insights":[str,str,str] (very short, review-style),
+"travel":str (e.g. '12 min by taxi')}]}]}
+Rules: 4 stops per day, times ascending between 08:00 and 21:00, real places only,
+never repeat a place, keep every text field short, total spend within the budget."""
 
 
 def build_prompt(req: TripRequest, n_days: int) -> str:
-    return (
-        f"Plan {n_days} days in {req.destination}. Budget: INR {req.budget_inr}. "
+    budget = req.budget or req.budget_inr
+    p = (
+        f"Plan {n_days} days in {req.destination}. Budget: INR {budget}. "
         f"Interests: {', '.join(req.interests)}. "
         f"Accessibility needs: {'YES - prefer step-free venues, avoid steep climbs' if req.accessibility else 'no'}."
     )
+    if req.total_days and req.total_days > n_days:
+        first = req.day_offset + 1
+        last = req.day_offset + n_days
+        p += f" These are days {first}-{last} of a {req.total_days}-day trip."
+        if req.day_offset > 0:
+            p += " Other days already cover the most famous landmarks, so pick different neighbourhoods and lesser-known real places."
+    return p
 
 
-def validate_itinerary(raw: dict, req: TripRequest, n_days: int) -> dict:
+def validate_itinerary(raw: dict, n_days: int) -> dict:
     """Rule layer: never trust the LLM blindly."""
     days = raw.get("days", [])[:n_days]
     if len(days) < n_days:
         raise ValueError(f"Expected {n_days} days, got {len(days)}")
     required = {"time", "name", "category", "description"}
+    seen = set()
     for d in days:
-        stops = [s for s in d.get("stops", []) if required <= s.keys()]
+        stops = []
+        for s in d.get("stops", []):
+            key = str(s.get("name", "")).strip().lower()
+            if required <= s.keys() and key not in seen:
+                seen.add(key)
+                stops.append(s)
         stops.sort(key=lambda s: s["time"])
         if not stops:
             raise ValueError("A day came back with no valid stops")
@@ -72,17 +103,9 @@ def validate_itinerary(raw: dict, req: TripRequest, n_days: int) -> dict:
     return {"days": days}
 
 
-@app.post("/api/itinerary")
-def generate_itinerary(req: TripRequest):
-    n_days = (req.end_date - req.start_date).days + 1
-    if not 1 <= n_days <= 7:
-        raise HTTPException(400, "Trip must be 1-7 days")
-    if not os.getenv("GROQ_API_KEY"):
-        raise HTTPException(503, "GROQ_API_KEY not set")
-    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    last_error = "unknown"
-    for attempt in range(2):  # small models slip sometimes: retry once
-        resp = client.chat.completions.create(
+def call_groq(req: TripRequest, n_days: int) -> str:
+    def run(fast: bool):
+        kwargs = dict(
             model=MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -92,12 +115,43 @@ def generate_itinerary(req: TripRequest):
             temperature=0.4,
             max_tokens=4000,
         )
-        text = resp.choices[0].message.content or ""
+        if fast:
+            kwargs["extra_body"] = {"reasoning_effort": "low"}  # far less thinking = much faster
+        return get_client().chat.completions.create(**kwargs)
+
+    try:
+        resp = run(True)
+    except Exception:
+        resp = run(False)  # if the model rejects the fast option
+    return resp.choices[0].message.content or ""
+
+
+@app.post("/api/itinerary")
+def generate_itinerary(req: TripRequest):
+    n_days = (req.end_date - req.start_date).days + 1
+    if not 1 <= n_days <= MAX_CHUNK_DAYS:
+        raise HTTPException(400, f"Each request must be 1-{MAX_CHUNK_DAYS} days")
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(503, "GROQ_API_KEY not set")
+
+    cache_key = str(req)
+    if cache_key in _cache:
+        return _cache[cache_key]
+
+    started = time.time()
+    last_error = "unknown"
+    for attempt in range(2):  # small models slip sometimes: retry once
         try:
+            text = call_groq(req, n_days)
             raw = json.loads(text[text.index("{"): text.rindex("}") + 1])
-            return validate_itinerary(raw, req, n_days)
+            result = validate_itinerary(raw, n_days)
+            _cache[cache_key] = result
+            print(f"[itinerary] {req.destination} {n_days}d took {time.time() - started:.1f}s (attempt {attempt + 1})")
+            return result
         except (ValueError, json.JSONDecodeError) as e:
             last_error = str(e)
+        except Exception as e:  # rate limit, network, etc.
+            last_error = f"{type(e).__name__}: {e}"
     raise HTTPException(502, f"Bad itinerary from model after 2 tries: {last_error}")
 
 
