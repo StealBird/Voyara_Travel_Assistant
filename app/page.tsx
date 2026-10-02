@@ -61,7 +61,7 @@ async function wikiImages(titles: string[], width: number): Promise<Record<strin
 function SafeImg({ src, alt, className, fill }: { src?: string; alt: string; className?: string; fill?: boolean }) {
   const [bad, setBad] = useState(false)
   useEffect(() => setBad(false), [src])
-  if (bad || !src) return <div className={className} style={fill ? { position: 'absolute', inset: 0, background: 'linear-gradient(135deg,#f6d9c4,#c9d6f2)' } : { background: '#efe9df' }} />
+  if (bad || !src) return <div className={className} style={fill ? { position: 'absolute', inset: 0, background: '#E7E4DE' } : { background: '#E7E4DE' }} />
   return <img src={src} alt={alt} className={className} onError={() => setBad(true)} />
 }
 
@@ -100,7 +100,7 @@ function toDays(plan: any, startDate: string): Day[] {
 }
 
 function Logo() {
-  return <div className="flex items-center gap-2.5"><div className="flex size-8 items-center justify-center rounded-xl bg-[#1a2f5c] text-[#faf9f6]"><Compass className="size-4" strokeWidth={2.2} /></div><span className="font-semibold tracking-[-0.03em] text-[#1a2f5c]">Voyara</span></div>
+  return <div className="flex items-center gap-2.5"><div className="flex size-8 items-center justify-center rounded-xl bg-foreground text-background"><Compass className="size-4" strokeWidth={2.2} /></div><span className="font-semibold tracking-[-0.03em] text-foreground">Voyara</span></div>
 }
 
 type PanelProps = {
@@ -119,40 +119,40 @@ function PlanningPanel(p: PanelProps) {
   const today = new Date().toISOString().slice(0, 10)
   const tooLong = p.tripLength > MAX_DAYS
   const badRange = p.startDate !== '' && p.endDate !== '' && p.tripLength < 1
-  return <section className="mx-auto flex w-full max-w-3xl flex-col gap-7 rounded-3xl border border-[#ebe7df] bg-white/70 p-6 backdrop-blur sm:p-8">
-    <div><p className="eyebrow">Your next chapter</p><h1 className="mt-2 text-3xl font-semibold tracking-[-0.045em] text-[#1a2f5c]">Plan your trip</h1><p className="mt-2 max-w-md text-sm leading-6 text-[#687080]">Shape a few details and we’ll make the rest feel effortless.</p></div>
+  return <section className="mx-auto flex w-full max-w-3xl flex-col gap-7 rounded-2xl border border-border bg-card p-6 sm:p-8">
+    <div><p className="eyebrow">Your next chapter</p><h1 className="mt-2 font-serif text-4xl font-normal tracking-[-0.01em] text-foreground">Plan your trip</h1><p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">Shape a few details and we’ll make the rest feel effortless.</p></div>
     <div className="grid gap-6 md:grid-cols-2">
       <div>
-        <label className="field-label">Destination<span className="field-value mt-2"><MapPin className="size-4 shrink-0 text-[#c9660a]" /><input value={p.destination} onChange={(e) => p.setDestination(e.target.value)} placeholder="Where to?" className="w-full bg-transparent outline-none" /></span></label>
+        <label className="field-label">Destination<span className="field-value mt-2"><MapPin className="size-4 shrink-0 text-brand" /><input value={p.destination} onChange={(e) => p.setDestination(e.target.value)} placeholder="Where to?" className="w-full bg-transparent outline-none" /></span></label>
         <div className="mt-2 flex flex-wrap gap-2">{QUICK_PICKS.map((c) => <button key={c} type="button" onClick={() => p.setDestination(c)} className={`interest-chip ${p.destination === c ? 'interest-chip-active' : ''}`}>{c}</button>)}</div>
       </div>
       <div>
-        <label className="field-label">Dates<span className="field-value mt-2"><Clock3 className="size-4 shrink-0 text-[#c9660a]" /><input type="date" min={today} value={p.startDate} onChange={(e) => { p.setStartDate(e.target.value); if (p.endDate && e.target.value > p.endDate) p.setEndDate(e.target.value) }} className="min-w-0 bg-transparent text-sm outline-none" /><span>–</span><input type="date" min={p.startDate || today} value={p.endDate} onChange={(e) => p.setEndDate(e.target.value)} className="min-w-0 bg-transparent text-sm outline-none" /></span></label>
-        <p className={`mt-2 text-xs ${tooLong || badRange ? 'text-red-500' : 'text-[#98a0aa]'}`}>{tooLong ? `Maximum ${MAX_DAYS} days` : badRange ? 'End date must be after start date' : p.tripLength > 0 ? `${p.tripLength} day${p.tripLength > 1 ? 's' : ''}` : `Up to ${MAX_DAYS} days`}</p>
+        <label className="field-label">Dates<span className="field-value mt-2"><Clock3 className="size-4 shrink-0 text-brand" /><input type="date" min={today} value={p.startDate} onChange={(e) => { p.setStartDate(e.target.value); if (p.endDate && e.target.value > p.endDate) p.setEndDate(e.target.value) }} className="min-w-0 bg-transparent text-sm outline-none" /><span>–</span><input type="date" min={p.startDate || today} value={p.endDate} onChange={(e) => p.setEndDate(e.target.value)} className="min-w-0 bg-transparent text-sm outline-none" /></span></label>
+        <p className={`mt-2 text-xs ${tooLong || badRange ? 'text-destructive' : 'text-muted-foreground'}`}>{tooLong ? `Maximum ${MAX_DAYS} days` : badRange ? 'End date must be after start date' : p.tripLength > 0 ? `${p.tripLength} day${p.tripLength > 1 ? 's' : ''}` : `Up to ${MAX_DAYS} days`}</p>
       </div>
       <div>
-        <label className="field-label">Budget (₹)<span className="field-value mt-2"><span className="text-[#c9660a]">₹</span><input type="number" min={1000} step={1000} value={p.budget || ''} onChange={(e) => p.setBudget(Number(e.target.value))} placeholder="Enter your budget" className="w-full bg-transparent outline-none" /></span></label>
-        <input aria-label="Trip budget" type="range" min={10000} max={500000} step={5000} value={Math.min(Math.max(p.budget, 10000), 500000)} onChange={(e) => p.setBudget(Number(e.target.value))} style={{ accentColor: '#c9660a', width: '100%', height: 8, marginTop: 16, cursor: 'pointer' }} />
-        <div className="mt-2 flex justify-between text-[11px] text-[#98a0aa]"><span>₹10k</span><span>Slide or type any amount</span><span>₹5L+</span></div>
+        <label className="field-label">Budget (₹)<span className="field-value mt-2"><span className="text-brand">₹</span><input type="number" min={1000} step={1000} value={p.budget || ''} onChange={(e) => p.setBudget(Number(e.target.value))} placeholder="Enter your budget" className="w-full bg-transparent outline-none" /></span></label>
+        <input aria-label="Trip budget" type="range" min={10000} max={500000} step={5000} value={Math.min(Math.max(p.budget, 10000), 500000)} onChange={(e) => p.setBudget(Number(e.target.value))} style={{ accentColor: 'var(--brand)', width: '100%', height: 8, marginTop: 16, cursor: 'pointer' }} />
+        <div className="mt-2 flex justify-between text-xs text-muted-foreground"><span>₹10k</span><span>Slide or type any amount</span><span>₹5L+</span></div>
       </div>
       <div><p className="field-label">Interests</p><div className="mt-3 flex flex-wrap gap-2">{choices.map((choice) => { const selected = p.interests.includes(choice); return <button key={choice} type="button" onClick={() => p.setInterests(selected ? p.interests.filter((i) => i !== choice) : [...p.interests, choice])} className={`interest-chip ${selected ? 'interest-chip-active' : ''}`}>{selected && <Check className="size-3" />}{choice}</button> })}</div></div>
     </div>
-    <div className={`accessibility-control ${p.accessibility ? 'accessibility-on' : ''}`}><div className="flex items-start gap-3"><div className="icon-well"><Accessibility className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#1a2f5c]">Accessibility needs</p><p className="mt-1 text-xs leading-5 text-[#7a8290]">Wheelchair access, medical proximity, low-mobility routing.</p>{p.accessibility && <p className="mt-2 text-xs font-medium text-[#597a68]">Your route will prioritize step-free options.</p>}</div><button type="button" aria-label="Toggle accessibility needs" aria-pressed={p.accessibility} onClick={() => p.setAccessibility(!p.accessibility)} className={`toggle ${p.accessibility ? 'toggle-on' : ''}`}><span /></button></div></div>
+    <div className={`accessibility-control ${p.accessibility ? 'accessibility-on' : ''}`}><div className="flex items-start gap-3"><div className="icon-well"><Accessibility className="size-4" /></div><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground">Accessibility needs</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Wheelchair access, medical proximity, low-mobility routing.</p>{p.accessibility && <p className="mt-2 text-xs font-medium text-success">Your route will prioritize step-free options.</p>}</div><button type="button" aria-label="Toggle accessibility needs" aria-pressed={p.accessibility} onClick={() => p.setAccessibility(!p.accessibility)} className={`toggle ${p.accessibility ? 'toggle-on' : ''}`}><span /></button></div></div>
     <div>
-      <Button onClick={p.onGenerate} disabled={p.generating || !p.canGenerate} className="h-12 w-full rounded-xl bg-[#c9660a] text-white shadow-[0_8px_22px_-10px_rgba(201,102,10,.8)] hover:bg-[#b85a06] disabled:opacity-50">{p.generating ? <><span className="loading-dot" />Building your itinerary…</> : <>Generate Itinerary <ArrowRight data-icon="inline-end" /></>}</Button>
-      <p className="mt-3 text-center text-[11px] leading-5 text-[#98a0aa]">{p.canGenerate ? 'Your preferences are used to build a thoughtful first draft.' : 'Pick a destination, dates and budget to get started.'}</p>
+      <Button onClick={p.onGenerate} disabled={p.generating || !p.canGenerate} className="h-12 w-full">{p.generating ? <><span className="loading-dot" />Building your itinerary…</> : <>Generate Itinerary <ArrowRight data-icon="inline-end" /></>}</Button>
+      <p className="mt-3 text-center text-xs leading-5 text-muted-foreground">{p.canGenerate ? 'Your preferences are used to build a thoughtful first draft.' : 'Pick a destination, dates and budget to get started.'}</p>
     </div>
   </section>
 }
 
 function Timeline({ stops, selected, setSelected, accessible }: { stops: Stop[]; selected: string; setSelected: (name: string) => void; accessible?: boolean }) {
   const visibleStops = accessible ? [...stops].sort((a, b) => (a.name.includes('Station') ? -1 : b.name.includes('Station') ? 1 : 0)) : stops
-  return <div className="timeline">{visibleStops.map((stop, index) => { const Icon = stop.icon; const isSelected = selected === stop.name; return <button key={stop.name + index} type="button" onClick={() => setSelected(stop.name)} className={`timeline-row ${isSelected ? 'timeline-row-selected' : ''}`}><div className="timeline-time">{stop.time}</div><div className="timeline-marker-wrap"><div className={`timeline-marker ${isSelected ? 'timeline-marker-selected' : ''}`}><Icon className="size-4" /></div>{index < visibleStops.length - 1 && <div className="timeline-line" />}</div><div className="timeline-stop-content"><div className="timeline-thumb-wrap"><SafeImg src={stop.image} alt={stop.name} className="timeline-thumb" /><span className="timeline-thumb-badge"><Icon className="size-3" /></span></div><div className="min-w-0 flex-1 pb-8 text-left"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[17px] font-semibold tracking-[-0.02em] text-[#1a2f5c]">{stop.name}</h3><span className="category-label">{stop.category}</span></div><p className="mt-1.5 max-w-xl text-sm leading-6 text-[#687080]">{stop.description}</p>{stop.travel && <div className="mt-3 flex items-center gap-2 text-xs text-[#98a0aa]"><TrainFront className="size-3.5" />{stop.travel}</div>}</div></div></button> })}</div>
+  return <div className="timeline">{visibleStops.map((stop, index) => { const Icon = stop.icon; const isSelected = selected === stop.name; return <button key={stop.name + index} type="button" onClick={() => setSelected(stop.name)} className={`timeline-row ${isSelected ? 'timeline-row-selected' : ''}`}><div className="timeline-time">{stop.time}</div><div className="timeline-marker-wrap"><div className={`timeline-marker ${isSelected ? 'timeline-marker-selected' : ''}`}><Icon className="size-4" /></div>{index < visibleStops.length - 1 && <div className="timeline-line" />}</div><div className="timeline-stop-content"><div className="timeline-thumb-wrap"><SafeImg src={stop.image} alt={stop.name} className="timeline-thumb" /><span className="timeline-thumb-badge"><Icon className="size-3" /></span></div><div className="min-w-0 flex-1 pb-8 text-left"><div className="flex flex-wrap items-center gap-2"><h3 className="text-[17px] font-semibold tracking-[-0.01em] text-foreground">{stop.name}</h3><span className="category-label">{stop.category}</span></div><p className="mt-1.5 max-w-xl text-sm leading-6 text-muted-foreground">{stop.description}</p>{stop.travel && <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><TrainFront className="size-3.5" />{stop.travel}</div>}</div></div></button> })}</div>
 }
 
 function Intelligence({ stop }: { stop?: Stop }) {
-  if (!stop) return <aside className="intelligence-panel"><div className="icon-well"><Sparkles className="size-4 text-[#c9660a]" /></div><p className="mt-5 text-sm leading-6 text-[#98a0aa]">Pick any stop to see why it fits.</p></aside>
-  return <aside className="intelligence-panel"><div className="flex items-center justify-between"><div className="icon-well"><Sparkles className="size-4 text-[#c9660a]" /></div><span className="text-[11px] font-medium text-[#98a0aa]">Recent feedback</span></div><SafeImg src={stop.image} alt={stop.name} className="intelligence-image" /><p className="mt-5 text-xs font-semibold uppercase tracking-[0.14em] text-[#9a8a78]">Why this place</p><h2 className="mt-2 text-xl font-semibold tracking-[-0.03em] text-[#1a2f5c]">{stop.name}</h2><div className="mt-5 flex flex-col gap-3">{stop.insights.map((insight, index) => <div key={insight} className="flex items-start gap-2.5 text-sm leading-5 text-[#687080]"><span className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ${index === 1 ? 'bg-[#f8eee7] text-[#c9660a]' : 'bg-[#e8f1eb] text-[#597a68]'}`}>{index === 1 ? '!' : <Check className="size-3" />}</span>{insight}</div>)}</div><div className="mt-7 border-t border-[#e9e5dc] pt-4"><p className="text-[11px] leading-5 text-[#98a0aa]">Synthesized from recent traveler feedback, local guides, and accessibility notes.</p></div></aside>
+  if (!stop) return <aside className="intelligence-panel"><div className="icon-well"><Sparkles className="size-4" /></div><p className="mt-5 text-sm leading-6 text-muted-foreground">Pick any stop to see why it fits.</p></aside>
+  return <aside className="intelligence-panel"><div className="flex items-center justify-between"><div className="icon-well"><Sparkles className="size-4" /></div><span className="text-xs font-medium text-muted-foreground">Recent feedback</span></div><SafeImg src={stop.image} alt={stop.name} className="intelligence-image" /><p className="mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Why this place</p><h2 className="mt-2 font-serif text-2xl font-normal text-foreground">{stop.name}</h2><div className="mt-5 flex flex-col gap-3">{stop.insights.map((insight, index) => <div key={insight} className="flex items-start gap-2.5 text-sm leading-5 text-muted-foreground"><span className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ${index === 1 ? 'bg-brand-soft text-brand-strong' : 'bg-success-soft text-success'}`}>{index === 1 ? '!' : <Check className="size-3" />}</span>{insight}</div>)}</div><div className="mt-7 border-t border-border pt-4"><p className="text-xs leading-5 text-muted-foreground">Synthesized from recent traveler feedback, local guides, and accessibility notes.</p></div></aside>
 }
 
 function GuideChat({ open, setOpen, city }: { open: boolean; setOpen: (value: boolean) => void; city: string }) {
@@ -182,21 +182,21 @@ function GuideChat({ open, setOpen, city }: { open: boolean; setOpen: (value: bo
   }
 
   return <div className="guide-wrap">{open && <section className="guide-panel" aria-label="Local guide chat">
-    <div className="flex items-center justify-between border-b border-[#ebe7df] px-5 py-4"><div><p className="text-sm font-semibold text-[#1a2f5c]">Ask your local guide</p><p className="mt-1 text-xs text-[#98a0aa]">{city ? `Local tips for ${city}` : 'Ask anything about your trip'}</p></div><button type="button" onClick={() => setOpen(false)} aria-label="Close guide"><X className="size-4 text-[#687080]" /></button></div>
+    <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="text-sm font-semibold text-foreground">Ask your local guide</p><p className="mt-1 text-xs text-muted-foreground">{city ? `Local tips for ${city}` : 'Ask anything about your trip'}</p></div><button type="button" onClick={() => setOpen(false)} aria-label="Close guide"><X className="size-4 text-muted-foreground" /></button></div>
     <div className="flex flex-col gap-3 p-5">
       <div className="flex max-h-72 flex-col gap-3 overflow-y-auto pr-1">
-        {messages.length === 0 && <div className="rounded-2xl rounded-bl-md bg-[#eef2f7] px-3.5 py-3 text-sm leading-6 text-[#4c5666]">Hi! Ask me about transport, food, etiquette or timing. Pick your language below.</div>}
-        {messages.map((m, i) => <div key={i} className={m.role === 'user' ? 'self-end rounded-2xl rounded-br-md bg-[#f1eee8] px-3.5 py-2.5 text-sm text-[#4c5666]' : 'rounded-2xl rounded-bl-md bg-[#eef2f7] px-3.5 py-3 text-sm leading-6 text-[#4c5666]'}>{m.content}</div>)}
-        {loading && <div className="rounded-2xl rounded-bl-md bg-[#eef2f7] px-3.5 py-3 text-sm text-[#98a0aa]">Typing…</div>}
+        {messages.length === 0 && <div className="rounded-2xl rounded-bl-md bg-secondary px-3.5 py-3 text-sm leading-6 text-foreground/80">Hi! Ask me about transport, food, etiquette or timing. Pick your language below.</div>}
+        {messages.map((m, i) => <div key={i} className={m.role === 'user' ? 'self-end rounded-2xl rounded-br-md bg-brand-soft px-3.5 py-2.5 text-sm text-foreground' : 'rounded-2xl rounded-bl-md bg-secondary px-3.5 py-3 text-sm leading-6 text-foreground/80'}>{m.content}</div>)}
+        {loading && <div className="rounded-2xl rounded-bl-md bg-secondary px-3.5 py-3 text-sm text-muted-foreground">Typing…</div>}
         <div ref={endRef} />
       </div>
-      <div className="flex items-center gap-2 border-t border-[#ebe7df] pt-3">
+      <div className="flex items-center gap-2 border-t border-border pt-3">
         <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') send() }} placeholder="Type your question…" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
-        <button type="button" onClick={send} disabled={loading || !input.trim()} aria-label="Send" className="text-[#c9660a] disabled:opacity-40"><ArrowRight className="size-4" /></button>
+        <button type="button" onClick={send} disabled={loading || !input.trim()} aria-label="Send" className="text-brand disabled:opacity-40"><ArrowRight className="size-4" /></button>
       </div>
       <div className="flex items-center justify-between">
-        <select value={language} onChange={(event) => setLanguage(event.target.value)} className="bg-transparent text-xs font-medium text-[#687080] outline-none"><option>English</option><option>Hindi</option><option>Marathi</option><option>Japanese</option><option>Spanish</option><option>French</option></select>
-        <Globe2 className="size-4 text-[#98a0aa]" />
+        <select value={language} onChange={(event) => setLanguage(event.target.value)} className="bg-transparent text-xs font-medium text-muted-foreground outline-none"><option>English</option><option>Hindi</option><option>Marathi</option><option>Japanese</option><option>Spanish</option><option>French</option></select>
+        <Globe2 className="size-4 text-muted-foreground" />
       </div>
     </div></section>}<button type="button" onClick={() => setOpen(!open)} aria-label={open ? 'Close local guide' : 'Open local guide'} className="guide-button">{open ? <X className="size-5" /> : <MessageCircle className="size-5" />}<span className="guide-ping" /></button></div>
 }
@@ -238,7 +238,7 @@ export default function Page() {
     return () => { cancelled = true; clearTimeout(t) }
   }, [destination])
 
-   const fillImages = async (dest: string, mapped: Day[], id: number) => {
+  const fillImages = async (dest: string, mapped: Day[], id: number) => {
     const places = mapped.flatMap((d) => d.stops.map((s) => ({ name: s.name.trim(), city: dest })))
     const [destSmall, destBig, stopUrls] = await Promise.all([
       wikiImages([titleCase(dest)], 800),
@@ -297,11 +297,11 @@ export default function Page() {
 
   const switchDay = (index: number) => { setDay(index); setSelected(days[index]?.stops[0]?.name ?? '') }
 
-   const dayTabs = <div role="tablist" aria-label="Trip days" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, overflow: 'visible' }}>{days.map((item, index) => <button key={item.id} type="button" role="tab" aria-selected={day === index} onClick={() => switchDay(index)} className={`day-tab ${day === index ? 'day-tab-active' : ''}`}><span>{item.label}</span><small>{item.date}</small></button>)}</div>
+  const dayTabs = <div role="tablist" aria-label="Trip days" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, overflow: 'visible' }}>{days.map((item, index) => <button key={item.id} type="button" role="tab" aria-selected={day === index} onClick={() => switchDay(index)} className={`day-tab ${day === index ? 'day-tab-active' : ''}`}><span>{item.label}</span><small>{item.date}</small></button>)}</div>
 
-  const accessToggle = <div className="flex items-center gap-2 text-sm text-[#687080]"><Accessibility className="size-4" /><span>Accessibility</span><button type="button" aria-label="Toggle accessibility mode" aria-pressed={accessibility} onClick={() => setAccessibility(!accessibility)} className={`toggle ${accessibility ? 'toggle-on' : ''}`}><span /></button></div>
+  const accessToggle = <div className="flex items-center gap-2 text-sm text-muted-foreground"><Accessibility className="size-4" /><span>Accessibility</span><button type="button" aria-label="Toggle accessibility mode" aria-pressed={accessibility} onClick={() => setAccessibility(!accessibility)} className={`toggle ${accessibility ? 'toggle-on' : ''}`}><span /></button></div>
 
-  return <main className="voyara-app"><header className="topbar"><Logo /><nav className="main-nav" aria-label="Main navigation"><button type="button" className={activePage === 'plan' ? 'nav-item nav-item-active' : 'nav-item'} onClick={() => setActivePage('plan')}>Plan</button><button type="button" className={activePage === 'trip' ? 'nav-item nav-item-active' : 'nav-item'} onClick={() => setActivePage('trip')}>My Trip</button></nav><div className="ml-auto flex items-center gap-3">{trip && <span className="hidden text-xs text-[#98a0aa] sm:block">{trip.destination} · {fmt(trip.startDate)}–{fmt(trip.endDate)}</span>}<div className="avatar">AS</div></div></header>
+  return <main className="voyara-app"><header className="topbar"><Logo /><nav className="main-nav" aria-label="Main navigation"><button type="button" className={activePage === 'plan' ? 'nav-item nav-item-active' : 'nav-item'} onClick={() => setActivePage('plan')}>Plan</button><button type="button" className={activePage === 'trip' ? 'nav-item nav-item-active' : 'nav-item'} onClick={() => setActivePage('trip')}>My Trip</button></nav><div className="ml-auto flex items-center gap-3">{trip && <span className="hidden text-xs text-muted-foreground sm:block">{trip.destination} · {fmt(trip.startDate)}–{fmt(trip.endDate)}</span>}<div className="avatar">AS</div></div></header>
 
     {activePage === 'plan' ? <div className="page-shell">
       <div className="destination-hero">
@@ -309,41 +309,41 @@ export default function Page() {
         <div className="destination-hero-overlay" />
         <h1>{destination.trim() ? `${destination.trim()}, thoughtfully arranged.` : 'Somewhere new, thoughtfully arranged.'}</h1>
       </div>
-      {error && <p className="mb-4 text-sm text-red-500">{error}</p>}
+      {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
       {!generated || editing ? <>
         {generated && <button type="button" onClick={() => setEditing(false)} className="icon-link mb-4">← Back to itinerary</button>}
         <PlanningPanel accessibility={accessibility} setAccessibility={setAccessibility} generating={generating} canGenerate={canGenerate} onGenerate={handleGenerate} budget={budget} setBudget={setBudget} interests={interests} setInterests={setInterests} destination={destination} setDestination={setDestination} startDate={startDate} setStartDate={setStartDate} endDate={endDate} setEndDate={setEndDate} tripLength={tripLength} />
       </> : trip && <>
-        <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-[#ebe7df] bg-white/70 px-5 py-4 backdrop-blur">
-          <div className="flex items-center gap-2 text-sm font-semibold text-[#1a2f5c]"><MapPin className="size-4 text-[#c9660a]" />{trip.destination}</div>
-          <span className="text-sm text-[#687080]">{fmt(trip.startDate)} – {fmt(trip.endDate)} · {days.length} days</span>
-          <span className="text-sm text-[#687080]">₹{trip.budget.toLocaleString('en-IN')}</span>
+        <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-border bg-card px-5 py-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground"><MapPin className="size-4 text-brand" />{trip.destination}</div>
+          <span className="text-sm text-muted-foreground">{fmt(trip.startDate)} – {fmt(trip.endDate)} · {days.length} days</span>
+          <span className="text-sm text-muted-foreground">₹{trip.budget.toLocaleString('en-IN')}</span>
           {accessToggle}
           <button type="button" onClick={() => setEditing(true)} className="icon-link ml-auto">Edit trip</button>
         </div>
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
           <section className="itinerary-column">
             {dayTabs}
-            <div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow">{days[day].date} · {days[day].stops.length} stops</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#1a2f5c]">Day {day + 1} in {trip.destination}</h2></div><button type="button" className="icon-link"><ExternalLink className="size-4" />Share</button></div><div className="mt-8"><Timeline stops={days[day].stops} selected={selected} setSelected={setSelected} accessible={accessibility} /></div></div>
+            <div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow">{days[day].date} · {days[day].stops.length} stops</p><h2 className="mt-2 font-serif text-3xl font-normal tracking-[-0.01em] text-foreground">Day {day + 1} in {trip.destination}</h2></div><button type="button" className="icon-link"><ExternalLink className="size-4" />Share</button></div><div className="mt-8"><Timeline stops={days[day].stops} selected={selected} setSelected={setSelected} accessible={accessibility} /></div></div>
           </section>
           <Intelligence stop={selectedStop} />
         </div>
       </>}
     </div>
 
-    : !generated || !trip ? <div className="page-shell trip-shell"><div className="empty-itinerary"><Compass className="size-6 text-[#c9660a]" /><h2 className="mt-4 text-xl font-semibold text-[#1a2f5c]">No trip yet</h2><p className="mt-2 text-sm text-[#687080]">Plan one first and it will show up here.</p><Button onClick={() => setActivePage('plan')} className="mt-5 rounded-xl bg-[#c9660a] text-white hover:bg-[#b85a06]">Go to Plan</Button></div></div>
+    : !generated || !trip ? <div className="page-shell trip-shell"><div className="empty-itinerary"><Compass className="mx-auto size-6 text-brand" /><h2 className="mt-4 font-serif text-2xl font-normal text-foreground">No trip yet</h2><p className="mt-2 text-sm text-muted-foreground">Plan one first and it will show up here.</p><Button onClick={() => setActivePage('plan')} className="mt-5">Go to Plan</Button></div></div>
 
     : <div className="page-shell trip-shell">
       <div className="trip-hero"><SafeImg src={tripImage} alt={trip.destination} fill /><div className="trip-hero-overlay" /><div className="trip-hero-label"><p>Live trip · {trip.destination}</p><h2>Your trip to {trip.destination}</h2></div></div>
-      <div className="page-heading"><div><p className="text-sm text-[#687080]">{fmt(trip.startDate)} – {fmt(trip.endDate)} · {days.length} days</p></div>{accessToggle}</div>
-      {rain && <div className="live-strip"><div className="flex items-center gap-3"><div className="weather-icon"><CloudRain className="size-5" /></div><div><p className="text-sm font-semibold text-[#1a2f5c]">Rain expected</p><p className="mt-0.5 text-xs text-[#7a8290]">Live weather for {trip.destination}</p></div></div><div className="hidden h-8 w-px bg-[#e6d9ca] sm:block" /><div className="flex-1 text-sm text-[#687080]">Consider indoor alternatives for outdoor stops.</div></div>}
+      <div className="page-heading"><div><p className="text-sm text-muted-foreground">{fmt(trip.startDate)} – {fmt(trip.endDate)} · {days.length} days</p></div>{accessToggle}</div>
+      {rain && <div className="live-strip"><div className="flex items-center gap-3"><div className="weather-icon"><CloudRain className="size-5" /></div><div><p className="text-sm font-semibold text-foreground">Rain expected</p><p className="mt-0.5 text-xs text-muted-foreground">Live weather for {trip.destination}</p></div></div><div className="hidden h-8 w-px bg-border sm:block" /><div className="flex-1 text-sm text-muted-foreground">Consider indoor alternatives for outdoor stops.</div></div>}
       {accessibility && <div className="accessibility-banner"><Accessibility className="size-4" />Reordered for accessibility <span>Step-free venues are prioritized without removing the rest of your plan.</span></div>}
       <div className="trip-layout">
-        <section className="itinerary-column">{dayTabs}<div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow">Live itinerary · {days[day].date}</p><h2 className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-[#1a2f5c]">Follow the feeling.</h2></div><div className="live-label"><span className="status-dot" />Live</div></div><div className="mt-8"><Timeline stops={days[day].stops} selected={selected} setSelected={setSelected} accessible={accessibility} /></div></div></section>
+        <section className="itinerary-column">{dayTabs}<div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow">Live itinerary · {days[day].date}</p><h2 className="mt-2 font-serif text-3xl font-normal tracking-[-0.01em] text-foreground">Follow the feeling.</h2></div><div className="live-label"><span className="status-dot" />Live</div></div><div className="mt-8"><Timeline stops={days[day].stops} selected={selected} setSelected={setSelected} accessible={accessibility} /></div></div></section>
         <aside className="trip-side">
-          <div className="trip-card"><p className="eyebrow">Trip summary</p><div className="mt-4 flex items-end justify-between"><span className="text-4xl font-semibold tracking-[-0.06em] text-[#1a2f5c]">{days.reduce((n, d) => n + d.stops.length, 0)}<span className="ml-1 text-base font-medium text-[#98a0aa]">stops</span></span><span className="text-xs text-[#597a68]">{days.length} days</span></div></div>
-          <div className="trip-card"><p className="text-sm font-semibold text-[#1a2f5c]">Your preferences</p><p className="mt-3 text-sm leading-6 text-[#687080]">Budget ₹{trip.budget.toLocaleString('en-IN')}<br />{trip.interests.join(' · ') || 'No interests selected'}</p></div>
+          <div className="trip-card"><p className="eyebrow">Trip summary</p><div className="mt-4 flex items-end justify-between"><span className="text-4xl font-semibold tracking-[-0.04em] text-foreground">{days.reduce((n, d) => n + d.stops.length, 0)}<span className="ml-1 text-base font-medium text-muted-foreground">stops</span></span><span className="text-xs text-success">{days.length} days</span></div></div>
+          <div className="trip-card"><p className="text-sm font-semibold text-foreground">Your preferences</p><p className="mt-3 text-sm leading-6 text-muted-foreground">Budget ₹{trip.budget.toLocaleString('en-IN')}<br />{trip.interests.join(' · ') || 'No interests selected'}</p></div>
         </aside>
       </div>
     </div>}
