@@ -647,6 +647,109 @@ def nearby(req: NearbyReq):
     return result
 
 
+# ---------- 2f. explore: real places around a base, checked against the map ----------
+class ExploreReq(BaseModel):
+    destination: str
+    base: str
+    lat: float
+    lng: float
+    radius_km: int = Field(25, ge=3, le=100)
+    interests: list[str] = []
+    accessibility: bool = False
+    avoid: list[str] = []  # places already in the plan
+
+
+EXPLORE_PROMPT = """You are Voyara's local explorer. Suggest real places to visit around BASE (DESTINATION).
+Return ONLY valid JSON, no prose, no code fences:
+{"places":[{"name":str (the name people search for on a map),
+"category":"Sight|Food|Culture|Nature|Walk|Shopping|Evening|Indoor|Explore",
+"description":str (one short line),"why":str (one short line: why it fits THIS traveller),
+"cost_inr":int (per person, 0 if free),"duration_h":number (hours to visit)}]}
+Rules: 14 places, all within about RADIUS km of BASE in a straight line. Mix categories and match the traveller's interests.
+When RADIUS is above 25 these are day trips: spread them over different directions and pick places worth the journey.
+Real places only, never anything from the avoid list, keep every field short."""
+
+_explore_cache: dict = {}
+
+
+@app.post("/api/explore")
+async def explore(req: ExploreReq):
+    if not os.getenv("GROQ_API_KEY"):
+        raise HTTPException(503, "GROQ_API_KEY not set")
+    key = (round(req.lat, 2), round(req.lng, 2), req.radius_km, tuple(sorted(req.interests)), req.accessibility, len(req.avoid))
+    if key in _explore_cache:
+        return _explore_cache[key]
+    system = (EXPLORE_PROMPT.replace("RADIUS", str(req.radius_km))
+              .replace("BASE", req.base).replace("DESTINATION", req.destination))
+    user = json.dumps({
+        "interests": req.interests,
+        "accessibility": req.accessibility,
+        "avoid": req.avoid[:80],
+    })
+    raw_places: list = []
+    last_error = "unknown"
+    for attempt in range(2):
+        try:
+            text = await asyncio.to_thread(groq_complete, system, user, 3000)
+            raw = json.loads(text[text.index("{"): text.rindex("}") + 1])
+            raw_places = [p for p in raw.get("places", []) if isinstance(p, dict)]
+            if raw_places:
+                break
+            last_error = "no places"
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = str(e)
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+    if not raw_places:
+        raise HTTPException(502, f"Explore failed: {last_error}")
+
+    sem = asyncio.Semaphore(4)
+
+    async def verify(c: httpx.AsyncClient, p: dict) -> Optional[dict]:
+        name = clean_text(p.get("name"))
+        if not name:
+            return None
+        async with sem:
+            try:
+                r = await c.get("https://photon.komoot.io/api/", params={
+                    "q": f"{name}, {req.base}", "limit": 1, "lat": req.lat, "lon": req.lng})
+                co = r.json()["features"][0]["geometry"]["coordinates"]
+                la, lo = float(co[1]), float(co[0])
+            except Exception:
+                return None  # cannot be found on the map: do not suggest it
+        d = haversine_m(req.lat, req.lng, la, lo)
+        if d > req.radius_km * 1000 * 1.1:
+            return None  # a different place with the same name
+        try:
+            dur = max(0.5, min(12.0, float(p.get("duration_h", 2))))
+        except (TypeError, ValueError):
+            dur = 2.0
+        return {
+            "name": name,
+            "category": clean_text(p.get("category")) or "Explore",
+            "description": clean_text(p.get("description")),
+            "why": clean_text(p.get("why")),
+            "cost_inr": to_int(p.get("cost_inr")),
+            "duration_h": round(dur, 1),
+            "lat": la,
+            "lng": lo,
+            "dist_km": round(d / 1000, 1),
+        }
+
+    async with httpx.AsyncClient(timeout=8, headers=WIKI_HEADERS) as c:
+        checked = await asyncio.gather(*[verify(c, p) for p in raw_places[:16]])
+    seen, places = set(), []
+    for p in checked:
+        if p and p["name"].lower() not in seen:
+            seen.add(p["name"].lower())
+            places.append(p)
+    places.sort(key=lambda p: p["dist_km"])
+    result = {"places": places}
+    if places:
+        _explore_cache[key] = result
+    return result
+
+
 # ---------- 3. per-place images (no API key needed) ----------
 class PlaceReq(BaseModel):
     name: str
