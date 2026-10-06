@@ -1,6 +1,18 @@
 const API = process.env.NEXT_PUBLIC_API_URL;
 
-export async function generateItinerary(body: any) {
+export type ItineraryRequest = {
+  destination: string;
+  start_date: string;
+  end_date: string;
+  days?: number;
+  interests: string[];
+  budget: number;
+  accessibility: boolean;
+  day_offset?: number; // which day of the full trip this chunk starts at
+  total_days?: number; // length of the full trip
+};
+
+export async function generateItinerary(body: ItineraryRequest) {
   const res = await fetch(`${API}/api/itinerary`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

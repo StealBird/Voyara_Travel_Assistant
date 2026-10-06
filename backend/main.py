@@ -5,6 +5,7 @@ Endpoints
   POST /api/itinerary   -> Groq LLM drafts the plan, rule layer validates it
   GET  /api/weather     -> OpenWeatherMap + "swap to indoor?" rule
   POST /api/images      -> per-place photos (Wikipedia -> Commons -> city fallback)
+  POST /api/chat        -> multilingual local-guide chat
 """
 import asyncio
 import json
@@ -24,6 +25,9 @@ load_dotenv()
 
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 MAX_CHUNK_DAYS = 7
+# Stop costs (tickets + meals) may use at most this share of the budget.
+# The rest is kept for the stay and local transport.
+SPEND_SHARE = 0.55
 
 # Wikimedia blocks generic User-Agents. Put your real email here.
 WIKI_HEADERS = {
@@ -67,12 +71,25 @@ class TripRequest(BaseModel):
 # ---------- 1. itinerary: LLM draft + rule validation ----------
 SYSTEM_PROMPT = """You are Voyara's trip planner. Return ONLY valid JSON, no prose, no code fences.
 Schema:
-{"days":[{"stops":[{"time":"HH:MM","name":str,"category":"Sight|Food|Culture|Nature|Walk|Shopping|Evening|Indoor|Explore",
-"description":str (one short line),"badge":str (2-4 words),
+{"days":[{"theme":str (3-6 words),
+"area":str (main neighbourhood of the day),
+"overnight":str (neighbourhood to sleep in tonight, normally where the last stop is),
+"bridge":str (one short line: how tomorrow starts from where today ends),
+"stops":[{"time":"HH:MM","name":str,"category":"Sight|Food|Culture|Nature|Walk|Shopping|Evening|Indoor|Explore",
+"description":str (one short line),
+"why":str (one short line: why THIS place fits THIS traveller, mention their interest or budget),
+"badge":str (2-4 words),
 "insights":[str,str,str] (very short, review-style),
-"travel":str (e.g. '12 min by taxi')}]}]}
+"cost_inr":int (per-person cost at this stop in INR, 0 if free),
+"travel":str (from the previous stop, e.g. '12 min by taxi'),
+"transport":{"nearest":str (real nearest metro/train/bus stop),"mode":"Metro|Train|Bus|Tram|Ferry|Taxi|Walk",
+"distance":str (e.g. '400 m walk'),"tip":str (very short)}}]}]}
 Rules: 4 stops per day, times ascending between 08:00 and 21:00, real places only,
-never repeat a place, keep every text field short, total spend within the budget."""
+never repeat a place, keep every text field short.
+Group each day's stops in one or two nearby areas. Day N+1 must start in or next to the
+overnight area of day N, so the days connect.
+Only name transport stops you are sure exist; if unsure use mode Taxi and nearest "Taxi stand".
+All cost_inr values together must stay under 55 percent of the budget (the rest is for stay and local transport)."""
 
 
 def build_prompt(req: TripRequest, n_days: int) -> str:
@@ -82,16 +99,49 @@ def build_prompt(req: TripRequest, n_days: int) -> str:
         f"Interests: {', '.join(req.interests)}. "
         f"Accessibility needs: {'YES - prefer step-free venues, avoid steep climbs' if req.accessibility else 'no'}."
     )
+    is_last_chunk = not req.total_days or req.day_offset + n_days >= req.total_days
     if req.total_days and req.total_days > n_days:
         first = req.day_offset + 1
         last = req.day_offset + n_days
         p += f" These are days {first}-{last} of a {req.total_days}-day trip."
         if req.day_offset > 0:
-            p += " Other days already cover the most famous landmarks, so pick different neighbourhoods and lesser-known real places."
+            p += (
+                " Other days already cover the most famous landmarks, so pick different neighbourhoods"
+                " and lesser-known real places. Start day 1 of this batch near the city centre or main transport hub."
+            )
+    if is_last_chunk:
+        p += " The final day's bridge must be an empty string."
+    else:
+        p += " The final day's bridge should say tomorrow starts near the city centre."
     return p
 
 
-def validate_itinerary(raw: dict, n_days: int) -> dict:
+def to_int(v) -> int:
+    try:
+        return max(0, int(float(str(v).replace(",", "").replace("₹", "").strip())))
+    except (ValueError, TypeError):
+        return 0
+
+
+def clean_text(v) -> str:
+    return str(v).strip() if v is not None else ""
+
+
+def clean_transport(t) -> Optional[dict]:
+    if not isinstance(t, dict):
+        return None
+    nearest = clean_text(t.get("nearest"))
+    if not nearest:
+        return None
+    return {
+        "nearest": nearest,
+        "mode": clean_text(t.get("mode")) or "Transit",
+        "distance": clean_text(t.get("distance")),
+        "tip": clean_text(t.get("tip")),
+    }
+
+
+def validate_itinerary(raw: dict, n_days: int, budget: int) -> dict:
     """Rule layer: never trust the LLM blindly."""
     days = raw.get("days", [])[:n_days]
     if len(days) < n_days:
@@ -104,11 +154,28 @@ def validate_itinerary(raw: dict, n_days: int) -> dict:
             key = str(s.get("name", "")).strip().lower()
             if required <= s.keys() and key not in seen:
                 seen.add(key)
+                s["why"] = clean_text(s.get("why"))
+                s["cost_inr"] = to_int(s.get("cost_inr", s.get("cost", 0)))
+                s["transport"] = clean_transport(s.get("transport"))
                 stops.append(s)
         stops.sort(key=lambda s: s["time"])
         if not stops:
             raise ValueError("A day came back with no valid stops")
         d["stops"] = stops
+        d["theme"] = clean_text(d.get("theme"))
+        d["area"] = clean_text(d.get("area"))
+        d["overnight"] = clean_text(d.get("overnight"))
+        d["bridge"] = clean_text(d.get("bridge"))
+
+    # budget rule: stop costs must leave room for the stay
+    cap = int(budget * SPEND_SHARE)
+    total = sum(s["cost_inr"] for d in days for s in d["stops"])
+    if total > cap > 0:
+        factor = cap / total
+        for d in days:
+            for s in d["stops"]:
+                s["cost_inr"] = int(round(s["cost_inr"] * factor / 50) * 50)
+        print(f"[itinerary] costs scaled by {factor:.2f} to fit the budget")
     return {"days": days}
 
 
@@ -122,7 +189,7 @@ def call_groq(req: TripRequest, n_days: int) -> str:
             ],
             response_format={"type": "json_object"},
             temperature=0.4,
-            max_tokens=4000,
+            max_tokens=6000,
         )
         if fast:
             kwargs["extra_body"] = {"reasoning_effort": "low"}  # far less thinking = much faster
@@ -147,13 +214,14 @@ def generate_itinerary(req: TripRequest):
     if cache_key in _cache:
         return _cache[cache_key]
 
+    budget = req.budget or req.budget_inr
     started = time.time()
     last_error = "unknown"
     for attempt in range(2):  # small models slip sometimes: retry once
         try:
             text = call_groq(req, n_days)
             raw = json.loads(text[text.index("{"): text.rindex("}") + 1])
-            result = validate_itinerary(raw, n_days)
+            result = validate_itinerary(raw, n_days, budget)
             _cache[cache_key] = result
             print(f"[itinerary] {req.destination} {n_days}d took {time.time() - started:.1f}s (attempt {attempt + 1})")
             return result
@@ -248,6 +316,7 @@ async def images(places: list[PlaceReq]):
     ) as c:
         urls = await asyncio.gather(*[find_image(c, p.name, p.city) for p in places])
     return {"images": urls}
+
 
 # ---------- 4. multilingual local-guide chat ----------
 class ChatMsg(BaseModel):

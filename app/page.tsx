@@ -6,6 +6,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Accessibility,
   ArrowRight,
+  BedDouble,
   Check,
   Clock3,
   CloudRain,
@@ -19,8 +20,10 @@ import {
   Moon,
   Mountain,
   Plane,
+  Sparkles,
   TrainFront,
   Utensils,
+  Wallet,
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -32,8 +35,9 @@ const TripMap = dynamic(() => import('@/components/trip-map'), {
   loading: () => <div className="map-skeleton" />,
 })
 
-type Stop = { time: string; name: string; category: string; icon: LucideIcon; image: string; description: string; badge: string; insights: string[]; travel: string; lat?: number; lng?: number }
-type Day = { id: number; label: string; date: string; stops: Stop[] }
+type Transport = { nearest: string; mode: string; distance: string; tip: string }
+type Stop = { time: string; name: string; category: string; icon: LucideIcon; image: string; description: string; why: string; cost: number; transport: Transport | null; badge: string; insights: string[]; travel: string; lat?: number; lng?: number }
+type Day = { id: number; label: string; date: string; theme: string; area: string; overnight: string; bridge: string; stops: Stop[] }
 type TravelInfo = { km: number; intl: boolean; mode: string; mid: number; lo: number; hi: number }
 type Trip = { destination: string; origin: string; travel: TravelInfo | null; startDate: string; endDate: string; budget: number; interests: string[] }
 type PageId = 'plan' | 'explore' | 'trip' | 'profile'
@@ -74,6 +78,10 @@ const BAD_IMG = /(^|[^a-z])(map|maps|flag|logo|seal|locator|location|diagram|ico
 const titleCase = (s: string) => s.trim().replace(/\b\w/g, (c) => c.toUpperCase())
 const num = (v: any): number | undefined => (v === undefined || v === null || v === '' || Number.isNaN(Number(v)) ? undefined : Number(v))
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
+const costLabel = (n: number) => (n > 0 ? inr(n) : 'Free')
+const fmtKm = (d: number) => (d < 1 ? `${Math.round(d * 1000)} m` : `${d.toFixed(1)} km`)
+const mapsLink = (q: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`
+const daySpend = (d?: Day) => (d ? d.stops.reduce((n, s) => n + s.cost, 0) : 0)
 
 // fetch JSON with a timeout so one slow service can never freeze the app
 async function fetchJson(url: string, ms = 6000): Promise<any | null> {
@@ -220,8 +228,13 @@ function toDays(plan: any, startDate: string): Day[] {
     id: i + 1,
     label: `Day ${i + 1}`,
     date: fmt(startDate, i),
+    theme: d.theme ?? '',
+    area: d.area ?? '',
+    overnight: d.overnight ?? '',
+    bridge: d.bridge ?? '',
     stops: (d.stops ?? d.activities ?? []).map((s: any, j: number) => {
       const category = s.category ?? 'Sight'
+      const t = s.transport
       return {
         time: s.time ?? '',
         name: s.name ?? s.title ?? 'Stop',
@@ -229,6 +242,9 @@ function toDays(plan: any, startDate: string): Day[] {
         icon: iconFor(category, j),
         image: '',
         description: s.description ?? '',
+        why: s.why ?? '',
+        cost: Math.max(0, Math.round(Number(s.cost_inr ?? s.cost ?? 0)) || 0),
+        transport: t && t.nearest ? { nearest: String(t.nearest), mode: String(t.mode ?? 'Transit'), distance: String(t.distance ?? ''), tip: String(t.tip ?? '') } : null,
         badge: s.badge ?? '',
         insights: s.insights ?? ['Popular with travelers', 'Check opening hours', 'Matches your interests'],
         travel: s.travel ?? '',
@@ -337,19 +353,22 @@ function Connector({ flip }: { flip: boolean }) {
   return <svg className="journey-link" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true"><path d={flip ? 'M 86 0 C 86 34, 14 26, 14 60' : 'M 14 0 C 14 34, 86 26, 86 60'} /></svg>
 }
 
-function Timeline({ stops, selected, setSelected, accessible }: { stops: Stop[]; selected: string; setSelected: (name: string) => void; accessible?: boolean }) {
+function Timeline({ stops, selected, setSelected, accessible, dest }: { stops: Stop[]; selected: string; setSelected: (name: string) => void; accessible?: boolean; dest: string }) {
   const visibleStops = accessible ? [...stops].sort((a, b) => (a.name.includes('Station') ? -1 : b.name.includes('Station') ? 1 : 0)) : stops
+  // running total of the day, in the plan's own order
+  const cum = stops.reduce<number[]>((acc, s, i) => [...acc, (acc[i - 1] ?? 0) + s.cost], [])
   return <div className="journey">{visibleStops.map((stop, index) => {
     const Icon = stop.icon
     const isSelected = selected === stop.name
     const n = stops.indexOf(stop) + 1
+    const why = stop.why || stop.insights[0] || ''
     return <div key={stop.name + index}>
       {index > 0 && <Connector flip={index % 2 === 0} />}
       <article
         role="button"
         tabIndex={0}
         onClick={() => setSelected(stop.name)}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(stop.name) } }}
+        onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(stop.name) } }}
         className={`stop-card ${isSelected ? 'stop-card-selected' : ''}`}
       >
         <div className="stop-media">
@@ -361,11 +380,79 @@ function Timeline({ stops, selected, setSelected, accessible }: { stops: Stop[];
           <span className="category-label inline-flex items-center gap-1.5"><Icon className="size-3.5" />{stop.category}</span>
           <h3 className="mt-1 font-serif text-2xl font-normal leading-tight text-foreground">{stop.name}</h3>
           <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{stop.description}</p>
-          {stop.travel && <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><TrainFront className="size-3.5" />{stop.travel}</div>}
+
+          {why && <p className="mt-3 flex gap-2 rounded-xl bg-brand-soft px-3 py-2 text-sm leading-5 text-foreground"><Sparkles className="mt-0.5 size-4 shrink-0 text-brand" /><span><strong className="font-semibold">Why this place: </strong>{why}</span></p>}
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-2.5 py-1 font-medium text-foreground"><Wallet className="size-3.5" />{costLabel(stop.cost)}</span>
+            <span className="text-muted-foreground">Day so far {inr(cum[n - 1] ?? 0)}</span>
+          </div>
+
+          {stop.travel && <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"><ArrowRight className="size-3.5 shrink-0" />{index > 0 ? 'From previous stop: ' : ''}{stop.travel}</div>}
+
+          {stop.transport && <div className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
+            <TrainFront className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              Nearest transport: <span className="font-medium text-foreground">{stop.transport.nearest}</span> · {stop.transport.mode}{stop.transport.distance ? ` · ${stop.transport.distance}` : ''}{stop.transport.tip ? `. ${stop.transport.tip}` : ''}{' '}
+              <a href={mapsLink(`${stop.transport.nearest} ${dest}`)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 font-medium text-brand hover:underline">Open in Maps<ExternalLink className="size-3" /></a>
+            </span>
+          </div>}
         </div>
       </article>
     </div>
   })}</div>
+}
+
+// short note at the top of a day: where yesterday ended
+function DayFrom({ prev, first, dist }: { prev: Day; first?: Stop; dist: number | null }) {
+  const last = prev.stops[prev.stops.length - 1]
+  if (!last || !first) return null
+  return <div className="mb-6 rounded-2xl border border-border bg-card px-4 py-3 text-sm text-foreground">
+    <span className="text-muted-foreground">{prev.label} ended at </span><strong>{last.name}</strong>
+    <span className="text-muted-foreground">. Today starts at </span><strong>{first.name}</strong>
+    {dist !== null && <span className="text-muted-foreground">, {fmtKm(dist)} away.</span>}
+  </div>
+}
+
+// card at the bottom of a day: tonight and tomorrow, with a button to jump
+function DayNext({ cur, next, dist, onGo }: { cur: Day; next: Day; dist: number | null; onGo: () => void }) {
+  const last = cur.stops[cur.stops.length - 1]
+  const first = next.stops[0]
+  if (!last || !first) return null
+  return <div className="rounded-2xl border border-border bg-card p-4">
+    <p className="eyebrow">Tonight and tomorrow</p>
+    <div className="mt-3 flex flex-col gap-2 text-sm text-foreground">
+      <p className="flex items-start gap-2"><BedDouble className="mt-0.5 size-4 shrink-0 text-brand" /><span>{cur.label} ends at <strong>{last.name}</strong>{cur.overnight ? <>. Stay near <strong>{cur.overnight}</strong>.</> : '.'}</span></p>
+      <p className="flex items-start gap-2"><ArrowRight className="mt-0.5 size-4 shrink-0 text-brand" /><span>{next.label} starts at <strong>{first.name}</strong>{dist !== null && <> ({fmtKm(dist)} from where today ends)</>}.</span></p>
+      {cur.bridge && <p className="text-muted-foreground">{cur.bridge}</p>}
+    </div>
+    <Button size="sm" onClick={onGo} className="mt-4">Go to {next.label} <ArrowRight data-icon="inline-end" /></Button>
+  </div>
+}
+
+// spending so far against the trip budget (stops + getting there; stay is not counted yet)
+function SpendCard({ days, day, budget, travelCost }: { days: Day[]; day: number; budget: number; travelCost: number }) {
+  const today = daySpend(days[day])
+  const stopsTotal = days.reduce((n, d) => n + daySpend(d), 0)
+  const used = travelCost + stopsTotal
+  const left = budget - used
+  const over = left < 0
+  const pct = Math.min(100, Math.round((used / Math.max(budget, 1)) * 100))
+  const row = (label: string, value: string, strong = false, bad = false) => <div className="flex items-center justify-between gap-3"><dt className="text-muted-foreground">{label}</dt><dd className={`${strong ? 'font-semibold' : 'font-medium'} ${bad ? 'text-destructive' : 'text-foreground'}`}>{value}</dd></div>
+  return <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="flex items-center justify-between">
+      <p className="flex items-center gap-2 text-sm font-semibold text-foreground"><Wallet className="size-4 text-brand" />Spending tracker</p>
+      <span className="text-xs text-muted-foreground">Budget {inr(budget)}</span>
+    </div>
+    <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Budget used"><div className={`h-full rounded-full ${over ? 'bg-destructive' : 'bg-brand'}`} style={{ width: `${pct}%` }} /></div>
+    <dl className="mt-3 flex flex-col gap-1.5 text-xs">
+      {row(`${days[day]?.label ?? 'Today'} stops`, inr(today))}
+      {row(`All ${days.length} days, stops`, inr(stopsTotal))}
+      {row('Getting there', travelCost > 0 ? inr(travelCost) : 'Not estimated')}
+      {row(over ? 'Over budget by' : 'Left for stay and extras', inr(Math.abs(left)), true, over)}
+    </dl>
+    <p className="mt-3 text-xs leading-5 text-muted-foreground">Stop costs are per person. Stay and local transport are not counted yet.</p>
+  </div>
 }
 
 function MapCard({ stop }: { stop?: Stop }) {
@@ -373,9 +460,9 @@ function MapCard({ stop }: { stop?: Stop }) {
   return <div className="map-card">
     <SafeImg src={stop.image} alt={stop.name} className="map-card-img" />
     <div className="min-w-0">
-      <p className="category-label">{stop.category}</p>
+      <p className="category-label">{stop.category} · {costLabel(stop.cost)}</p>
       <h3 className="mt-0.5 font-serif text-xl font-normal leading-tight text-foreground">{stop.name}</h3>
-      <p className="mt-1 text-sm leading-5 text-muted-foreground">{stop.insights[0]}</p>
+      <p className="mt-1 text-sm leading-5 text-muted-foreground">{stop.why || stop.insights[0]}</p>
     </div>
   </div>
 }
@@ -464,6 +551,18 @@ export default function Page() {
   const canGenerate = origin.trim() !== '' && destination.trim() !== '' && tripLength >= 1 && tripLength <= MAX_DAYS && budget > 0
   const selectedStop = useMemo(() => days[day]?.stops.find((s) => s.name === selected) ?? days[day]?.stops[0], [days, day, selected])
   const pick = (name: string) => { setSelected(name); setFocusTick((t) => t + 1) }
+
+  // where a stop is on the map (from the plan, or geocoded in the background)
+  const locOf = (s?: Stop): LL | null => {
+    if (!s || !trip) return null
+    if (s.lat !== undefined && s.lng !== undefined) return { lat: s.lat, lng: s.lng }
+    return coords[`${s.name}|${trip.destination}`] ?? null
+  }
+  const gap = (a?: Stop, b?: Stop): number | null => {
+    const x = locOf(a)
+    const y = locOf(b)
+    return x && y ? km(x, y) : null
+  }
 
   const stopKey = days[day]?.stops.map((s) => s.name).join('|') ?? ''
   const mapPoints: MapPoint[] = useMemo(() => {
@@ -602,6 +701,8 @@ export default function Page() {
         interests,
         budget: Math.round((onGround * len) / total),
         accessibility,
+        day_offset: i,
+        total_days: total,
       })))
       const weather = await weatherPromise
 
@@ -622,10 +723,22 @@ export default function Page() {
   }
 
   const switchDay = (index: number) => { setDay(index); setSelected(days[index]?.stops[0]?.name ?? '') }
+  const jumpDay = (index: number) => { switchDay(index); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
   const dayTabs = <div role="tablist" aria-label="Trip days" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, overflow: 'visible' }}>{days.map((item, index) => <button key={item.id} type="button" role="tab" aria-selected={day === index} onClick={() => switchDay(index)} className={`day-tab ${day === index ? 'day-tab-active' : ''}`}><span>{item.label}</span><small>{item.date}</small></button>)}</div>
 
   const accessToggle = <div className="flex items-center gap-2 text-sm text-white/85"><Accessibility className="size-4" /><span>Accessibility</span><button type="button" aria-label="Toggle accessibility mode" aria-pressed={accessibility} onClick={() => setAccessibility(!accessibility)} className={`toggle ${accessibility ? 'toggle-on' : ''}`}><span /></button></div>
+
+  // note above the day's stops (where yesterday ended) and cards below them (tonight, tomorrow, spending)
+  const cur = days[day]
+  const prevDay = day > 0 ? days[day - 1] : undefined
+  const nextDay = day < days.length - 1 ? days[day + 1] : undefined
+  const dayHead = prevDay && cur ? <DayFrom prev={prevDay} first={cur.stops[0]} dist={gap(prevDay.stops[prevDay.stops.length - 1], cur.stops[0])} /> : null
+  const dayFoot = cur && trip ? <div className="mt-8 flex flex-col gap-4">
+    {nextDay && <DayNext cur={cur} next={nextDay} dist={gap(cur.stops[cur.stops.length - 1], nextDay.stops[0])} onGo={() => jumpDay(day + 1)} />}
+    <SpendCard days={days} day={day} budget={trip.budget} travelCost={trip.travel?.mid ?? 0} />
+  </div> : null
+  const dayMeta = cur ? [cur.theme, cur.area].filter(Boolean).join(' · ') : ''
 
   // ---------- what the background shows ----------
   const tripView = activePage === 'plan' && generated && !editing
@@ -672,7 +785,7 @@ export default function Page() {
             </div>
             <section className="day-panel">
               {dayTabs}
-              <div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow-light">{days[day].date} · {days[day].stops.length} stops</p><h2 className="mt-2 font-serif text-3xl font-normal tracking-[-0.01em] text-white">Day {day + 1} in {trip.destination}</h2></div><Button variant="ghost" size="sm" className={whiteGhost}><ExternalLink />Share</Button></div><div className="mt-8"><Timeline stops={days[day].stops} selected={selected} setSelected={pick} accessible={accessibility} /></div></div>
+              <div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow-light">{days[day].date} · {days[day].stops.length} stops · {inr(daySpend(days[day]))}</p><h2 className="mt-2 font-serif text-3xl font-normal tracking-[-0.01em] text-white">Day {day + 1} in {trip.destination}</h2>{dayMeta && <p className="mt-1 text-sm text-white/80">{dayMeta}</p>}</div><Button variant="ghost" size="sm" className={whiteGhost}><ExternalLink />Share</Button></div><div className="mt-8">{dayHead}<Timeline stops={days[day].stops} selected={selected} setSelected={pick} accessible={accessibility} dest={trip.destination} /></div>{dayFoot}</div>
             </section>
           </div>
         </>}
@@ -688,9 +801,10 @@ export default function Page() {
         {rain && <div className="live-strip"><div className="flex items-center gap-3"><div className="weather-icon"><CloudRain className="size-5" /></div><div><p className="text-sm font-semibold text-foreground">Rain expected</p><p className="mt-0.5 text-xs text-muted-foreground">Live weather for {trip.destination}</p></div></div><div className="hidden h-8 w-px bg-border sm:block" /><div className="flex-1 text-sm text-muted-foreground">Consider indoor alternatives for outdoor stops.</div></div>}
         {accessibility && <div className="accessibility-banner"><Accessibility className="size-4" />Reordered for accessibility <span>Step-free venues are prioritized without removing the rest of your plan.</span></div>}
         <div className="trip-layout">
-          <section className="itinerary-column">{dayTabs}<div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow-light">Live itinerary · {days[day].date}</p><h2 className="mt-2 font-serif text-3xl font-normal tracking-[-0.01em] text-white">Follow the feeling.</h2></div><div className="live-label"><span className="status-dot" />Live</div></div><div className="mt-8"><Timeline stops={days[day].stops} selected={selected} setSelected={setSelected} accessible={accessibility} /></div></div></section>
+          <section className="itinerary-column">{dayTabs}<div className="itinerary-content"><div className="flex items-baseline justify-between"><div><p className="eyebrow-light">Live itinerary · {days[day].date} · {inr(daySpend(days[day]))}</p><h2 className="mt-2 font-serif text-3xl font-normal tracking-[-0.01em] text-white">Follow the feeling.</h2>{dayMeta && <p className="mt-1 text-sm text-white/80">{dayMeta}</p>}</div><div className="live-label"><span className="status-dot" />Live</div></div><div className="mt-8">{dayHead}<Timeline stops={days[day].stops} selected={selected} setSelected={setSelected} accessible={accessibility} dest={trip.destination} /></div>{nextDay && <div className="mt-8"><DayNext cur={days[day]} next={nextDay} dist={gap(days[day].stops[days[day].stops.length - 1], nextDay.stops[0])} onGo={() => jumpDay(day + 1)} /></div>}</div></section>
           <aside className="trip-side">
             <div className="trip-card"><p className="eyebrow">Trip summary</p><div className="mt-4 flex items-end justify-between"><span className="text-4xl font-semibold tracking-[-0.04em] text-foreground">{days.reduce((n, d) => n + d.stops.length, 0)}<span className="ml-1 text-base font-medium text-muted-foreground">stops</span></span><span className="text-xs text-success">{days.length} days</span></div></div>
+            <SpendCard days={days} day={day} budget={trip.budget} travelCost={trip.travel?.mid ?? 0} />
             {trip.travel && <div className="trip-card"><p className="text-sm font-semibold text-foreground">Getting there</p><p className="mt-3 text-sm leading-6 text-muted-foreground">{trip.origin} → {trip.destination}<br />{trip.travel.mode} · about {trip.travel.km.toLocaleString('en-IN')} km<br />Round trip ≈ {inr(trip.travel.lo)}–{inr(trip.travel.hi)}</p></div>}
             <div className="trip-card"><p className="text-sm font-semibold text-foreground">Your preferences</p><p className="mt-3 text-sm leading-6 text-muted-foreground">Budget ₹{trip.budget.toLocaleString('en-IN')}<br />{trip.interests.join(' · ') || 'No interests selected'}</p></div>
           </aside>
