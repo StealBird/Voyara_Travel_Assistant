@@ -10,6 +10,7 @@ export type ItineraryRequest = {
   accessibility: boolean;
   day_offset?: number; // which day of the full trip this chunk starts at
   total_days?: number; // length of the full trip
+  day_context?: { base: string; start: string; max_stops: number }[]; // where we sleep each day
 };
 
 export async function generateItinerary(body: ItineraryRequest) {
@@ -61,4 +62,119 @@ export async function askGuide(body: {
   if (!res.ok) throw new Error("Chat failed");
   const data = await res.json();
   return data.reply;
+}
+
+export type DayWeather = {
+  rain: boolean;
+  rain_prob: number; // 0 to 1
+  temp_c: number;
+  condition: string;
+};
+
+// Forecast per date (YYYY-MM-DD) for roughly the next 5 days. Null if unavailable.
+export async function getForecast(city: string): Promise<Record<string, DayWeather> | null> {
+  try {
+    const res = await fetch(`${API}/api/forecast?city=${encodeURIComponent(city)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.days ?? null;
+  } catch {
+    return null; // weather is optional, never break the trip
+  }
+}
+
+export type RerouteRequest = {
+  destination: string;
+  interests: string[];
+  accessibility: boolean;
+  budget: number; // this day's share
+  reason: string; // "rain"
+  avoid: string[]; // places used on other days
+  day: any; // one day in the itinerary API shape
+};
+
+export async function rerouteDay(body: RerouteRequest): Promise<{ day: any }> {
+  const res = await fetch(`${API}/api/reroute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Reroute failed");
+  return res.json();
+}
+
+// ---------- realistic plan: where we sleep, how we move ----------
+export type PlanTransfer = {
+  mode: string;
+  hours: number; // door to door
+  depart: string; // HH:MM
+  arrive: string; // HH:MM
+  cost_inr: number;
+  note: string;
+  travel_days: number; // 1 = arrives the next calendar day
+};
+
+export type PlanDay = {
+  leg: number;
+  base: string; // town where we sleep and wake up
+  kind: string; // normal | travel | arrival
+  start: string; // earliest first stop, HH:MM ("" on a pure travel day)
+  max_stops: number;
+  transfer: PlanTransfer | null; // set on the first day of each leg
+  stay_type: string;
+  stay_cost_inr: number; // per night
+};
+
+export async function getPlan(body: {
+  origin: string;
+  destination: string;
+  n_days: number;
+  budget_inr: number;
+  interests: string[];
+  accessibility: boolean;
+  travel_km?: number;
+  travel_mode?: string;
+}): Promise<{ days: PlanDay[] } | null> {
+  try {
+    const res = await fetch(`${API}/api/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null; // the page falls back to a single base
+  }
+}
+
+// ---------- stays, medical and transit near a point (OpenStreetMap) ----------
+export type NearbyPlace = {
+  kind: "stay" | "medical" | "transit";
+  sub: string; // Hostel / dorm, Hotel, Hospital, Pharmacy, Bus stop...
+  name: string;
+  lat: number;
+  lng: number;
+  dist_m: number;
+  er?: boolean; // hospital with an emergency department
+};
+
+export async function getNearby(body: {
+  lat: number;
+  lng: number;
+  radius_m: number;
+  kinds: ("stay" | "medical" | "transit")[];
+}): Promise<NearbyPlace[]> {
+  try {
+    const res = await fetch(`${API}/api/nearby`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.places ?? [];
+  } catch {
+    return []; // map extras are optional, never break the trip
+  }
 }
