@@ -280,7 +280,7 @@ export default function TripMap({ points, selected, onSelect, focusTick, extras 
       dot.current?.setLatLng([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f])
       raf.current = requestAnimationFrame(tick)
     }
-    raf.current = requestAnimationFrame(tick)
+    
   }
 
   const fitJourney = () => {
