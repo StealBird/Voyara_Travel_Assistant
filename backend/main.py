@@ -534,6 +534,8 @@ def plan(req: PlanRequest):
 
 
 # ---------- 2e. stays, medical and transit near a point (OpenStreetMap, no key) ----------
+# Works for every location: it widens the search step by step until each kind has results,
+# so a village or a mountain town gets "nearest hospital 30 km away" instead of nothing.
 class NearbyReq(BaseModel):
     lat: float
     lng: float
@@ -541,19 +543,36 @@ class NearbyReq(BaseModel):
     kinds: list[str] = ["stay", "medical"]
 
 
-OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
+OVERPASS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
 KIND_FILTERS = {
-    "stay": ['["tourism"~"^(hotel|hostel|guest_house|motel|apartment|chalet)$"]'],
-    "medical": ['["amenity"~"^(hospital|clinic|pharmacy|doctors)$"]'],
+    "stay": ['["tourism"~"^(hotel|hostel|guest_house|motel|apartment|chalet|alpine_hut|wilderness_hut)$"]'],
+    "medical": [
+        '["amenity"~"^(hospital|clinic|pharmacy|doctors)$"]',
+        '["healthcare"~"^(hospital|clinic|doctor|pharmacy)$"]',
+    ],
     "transit": [
         '["railway"~"^(station|halt|tram_stop|subway_entrance)$"]',
         '["highway"="bus_stop"]',
-        '["amenity"="bus_station"]',
+        '["amenity"~"^(bus_station|ferry_terminal)$"]',
+        '["public_transport"="station"]',
+        '["aeroway"="aerodrome"]',
     ],
 }
+# far away only the big transport points matter (a bus stop 40 km away is useless)
+TRANSIT_FAR = [
+    '["railway"~"^(station|halt)$"]',
+    '["amenity"~"^(bus_station|ferry_terminal)$"]',
+    '["aeroway"="aerodrome"]',
+]
 KIND_LIMIT = {"stay": 30, "medical": 20, "transit": 12}
+ENOUGH = 3  # stop widening a kind once it has this many results
 STAY_SUB = {"hostel": "Hostel / dorm", "hotel": "Hotel", "guest_house": "Guesthouse",
-            "motel": "Motel", "apartment": "Apartment", "chalet": "Chalet"}
+            "motel": "Motel", "apartment": "Apartment", "chalet": "Chalet",
+            "alpine_hut": "Mountain hut", "wilderness_hut": "Mountain hut"}
 _nearby_cache: dict = {}
 
 
@@ -565,13 +584,14 @@ def haversine_m(lat1, lng1, lat2, lng2) -> int:
 
 def classify(tags: dict):
     t, a, rw, hw = tags.get("tourism"), tags.get("amenity"), tags.get("railway"), tags.get("highway")
+    hc, aw, pt = tags.get("healthcare"), tags.get("aeroway"), tags.get("public_transport")
     if t in STAY_SUB:
         return "stay", STAY_SUB[t], False
-    if a == "hospital":
+    if a == "hospital" or hc == "hospital":
         return "medical", "Hospital", tags.get("emergency") == "yes"
-    if a in ("clinic", "doctors"):
+    if a in ("clinic", "doctors") or hc in ("clinic", "doctor"):
         return "medical", "Clinic", False
-    if a == "pharmacy":
+    if a == "pharmacy" or hc == "pharmacy":
         return "medical", "Pharmacy", False
     if rw in ("station", "halt"):
         return "transit", ("Metro station" if tags.get("station") == "subway" else "Train station"), False
@@ -583,13 +603,25 @@ def classify(tags: dict):
         return "transit", "Bus stop", False
     if a == "bus_station":
         return "transit", "Bus station", False
+    if a == "ferry_terminal":
+        return "transit", "Ferry terminal", False
+    if aw == "aerodrome":
+        return "transit", "Airport", False
+    if pt == "station":
+        return "transit", "Station", False
     return None
+
+
+def filters_for(kind: str, radius: int) -> list:
+    if kind == "transit" and radius > 6000:
+        return TRANSIT_FAR
+    return KIND_FILTERS.get(kind, [])
 
 
 def overpass_query(lat: float, lng: float, radius: int, kinds: list) -> list:
     parts = []
     for k in kinds:
-        for f in KIND_FILTERS.get(k, []):
+        for f in filters_for(k, radius):
             parts.append(f"nwr(around:{radius},{lat},{lng}){f};")
     q = "[out:json][timeout:20];(" + "".join(parts) + ");out center tags 250;"
     last = None
@@ -608,15 +640,19 @@ def collect(elements: list, lat: float, lng: float, kinds: list) -> list:
     seen, out = set(), []
     for el in elements:
         tags = el.get("tags") or {}
-        name = tags.get("name") or tags.get("name:en")
         c = classify(tags)
-        if not name or not c or c[0] not in kinds:
+        if not c or c[0] not in kinds:
             continue
         la = el.get("lat") if "lat" in el else (el.get("center") or {}).get("lat")
         lo = el.get("lon") if "lon" in el else (el.get("center") or {}).get("lon")
-        if la is None or lo is None or (name, c[0]) in seen:
+        if la is None or lo is None:
             continue
-        seen.add((name, c[0]))
+        # many bus stops and pharmacies have no name on the map: show their type instead of dropping them
+        name = tags.get("name") or tags.get("name:en") or tags.get("int_name") or c[1]
+        key = (name, c[0], round(la, 3), round(lo, 3))
+        if key in seen:
+            continue
+        seen.add(key)
         out.append({"kind": c[0], "sub": c[1], "name": name, "lat": la, "lng": lo,
                     "dist_m": haversine_m(lat, lng, la, lo), "er": c[2]})
     out.sort(key=lambda p: p["dist_m"])
@@ -637,13 +673,41 @@ def nearby(req: NearbyReq):
     key = (round(req.lat, 3), round(req.lng, 3), req.radius_m, tuple(sorted(kinds)))
     if key in _nearby_cache:
         return _nearby_cache[key]
-    places = collect(overpass_query(req.lat, req.lng, req.radius_m, kinds), req.lat, req.lng, kinds)
-    wide = req.radius_m * 3
-    # a thin result (small town, or a stop with no stop nearby): look a little wider once
-    if wide <= 5000 and any(sum(1 for p in places if p["kind"] == k) < 4 for k in kinds):
-        places = collect(overpass_query(req.lat, req.lng, wide, kinds), req.lat, req.lng, kinds)
-    result = {"places": places}
-    _nearby_cache[key] = result
+
+    # search radii: what the caller asked for, then wider and wider
+    steps: list = []
+    for r in (req.radius_m, req.radius_m * 3, 10000, 30000, 80000):
+        if not steps or r > steps[-1]:
+            steps.append(r)
+
+    found = {k: [] for k in kinds}
+    used = {k: steps[0] for k in kinds}
+    pending = list(kinds)
+    started = time.time()
+    partial = False
+    for i, r in enumerate(steps):
+        if not pending:
+            break
+        if time.time() - started > 35:  # never keep the user waiting forever
+            partial = True
+            break
+        try:
+            elements = overpass_query(req.lat, req.lng, r, pending)
+        except HTTPException:
+            if i == 0:
+                raise  # nothing at all: let the frontend retry
+            partial = True
+            break
+        got = collect(elements, req.lat, req.lng, pending)
+        for k in pending:
+            found[k] = [p for p in got if p["kind"] == k]
+            used[k] = r
+        pending = [k for k in pending if len(found[k]) < ENOUGH]
+
+    places = sorted((p for k in kinds for p in found[k]), key=lambda p: p["dist_m"])
+    result = {"places": places, "radius_m": used}
+    if not partial:
+        _nearby_cache[key] = result  # never cache a half-finished search
     return result
 
 

@@ -155,7 +155,7 @@ export type NearbyPlace = {
   name: string;
   lat: number;
   lng: number;
-  dist_m: number;
+  dist_m: number; // can be tens of km in remote places: the backend widens the search
   er?: boolean; // hospital with an emergency department
 };
 
@@ -165,16 +165,22 @@ export async function getNearby(body: {
   radius_m: number;
   kinds: ("stay" | "medical" | "transit")[];
 }): Promise<NearbyPlace[]> {
-  try {
-    const res = await fetch(`${API}/api/nearby`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.places ?? [];
-  } catch {
-    return []; // map extras are optional, never break the trip
+  // one retry: the free Render server may be waking up, or the map data server may hiccup
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${API}/api/nearby`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.places ?? [];
+      }
+    } catch {
+      // fall through and retry
+    }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
   }
+  return []; // map extras are optional, never break the trip
 }
